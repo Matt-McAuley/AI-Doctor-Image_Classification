@@ -18,46 +18,72 @@ CLASSES_PER_DOMAIN = {
     'Chest_Xray': ['normal', 'pneumonia']
 }
 
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize([0.5], [0.5])
-])
+def load_checkpoint_model(model_path):
+    """
+    Loads a saved model checkpoint and reconstructs its architecture.
+    Returns (model, mean, std).
+    """
+    checkpoint = torch.load(model_path, map_location=DEVICE)
 
-def load_model(path, num_classes):
-    model = models.resnet18()
+    model = models.resnet18(weights='IMAGENET1K_V1')
+    num_classes = checkpoint["model_state_dict"]["fc.weight"].shape[0]
     model.fc = nn.Linear(model.fc.in_features, num_classes)
-    model.load_state_dict(torch.load(path, map_location=DEVICE))
-    model.eval().to(DEVICE)
-    return model
+    model = model.to(DEVICE)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model.eval()
 
-general_model = load_model(os.path.join(MODEL_DIR, 'General_Model.pth'), num_classes=len(DOMAINS))
-domain_models = {
-    d: load_model(os.path.join(MODEL_DIR, f'{d}_Model.pth'), num_classes=len(CLASSES_PER_DOMAIN[d]))
-    for d in DOMAINS
-}
+    mean = checkpoint.get("mean", [0.5])
+    std = checkpoint.get("std", [0.5])
 
-def classify_image_file(file_bytes):
-    """Classify image bytes from frontend upload."""
-    image = Image.open(io.BytesIO(file_bytes)).convert('L')
+    return model, mean, std
+
+def classify_uploaded_image(file_bytes):
+    """
+    Classifies an uploaded image (from frontend) using General_Model.pth first
+    to determine domain, then the appropriate domain-specific model.
+    Returns actual labels instead of indices.
+    """
+    # Load general model
+    general_model_path = os.path.join(MODEL_DIR, "General_Model.pth")
+    general_model, mean, std = load_checkpoint_model(general_model_path)
+
+    transform = transforms.Compose([
+        transforms.Grayscale(num_output_channels=1),
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std)
+    ])
+
+    image = Image.open(io.BytesIO(file_bytes)).convert("L")
     img_tensor = transform(image).unsqueeze(0).to(DEVICE)
 
-    # Step 1: Predict domain
+    # ----- Predict Domain -----
     with torch.no_grad():
         domain_logits = general_model(img_tensor)
         domain_idx = torch.argmax(domain_logits, dim=1).item()
         domain = DOMAINS[domain_idx]
 
-    # Step 2: Predict class within that domain
-    model = domain_models[domain]
+    # ----- Load Domain Model -----
+    domain_model_path = os.path.join(MODEL_DIR, f"{domain}_Model.pth")
+    domain_model, mean, std = load_checkpoint_model(domain_model_path)
+
+    transform = transforms.Compose([
+        transforms.Grayscale(num_output_channels=1),
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std)
+    ])
+    img_tensor = transform(image).unsqueeze(0).to(DEVICE)
+
+    # ----- Predict Class -----
     with torch.no_grad():
-        class_logits = model(img_tensor)
+        class_logits = domain_model(img_tensor)
         class_idx = torch.argmax(class_logits, dim=1).item()
+        class_label = CLASSES_PER_DOMAIN[domain][class_idx]
 
     return {
-        'domain': domain,
-        'domain_index': domain_idx,
-        'class_index': class_idx
+        "domain": domain,
+        "predicted_class": class_label
     }
 
 app = Flask(__name__)
@@ -69,10 +95,10 @@ def home():
 
 @app.route('/api/classify', methods=['POST'])
 def classify():
-    if 'image' not in request.files:
-        return jsonify({'error': 'No image uploaded'}), 400
-    file = request.files['image']
-    result = classify_image_file(file.read())
+    if "image" not in request.files:
+        return jsonify({"error": "No image uploaded"}), 400
+    file = request.files["image"]
+    result = classify_uploaded_image(file.read())
     return jsonify(result)
 
 if __name__ == '__main__':
