@@ -4,8 +4,111 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Doctor Image Classification</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f8f9fa;
+            text-align: center;
+            padding: 40px;
+        }
+        h1 {
+            color: #333;
+        }
+        #upload-section {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            padding: 20px;
+            display: inline-block;
+            margin-top: 30px;
+        }
+        input[type="file"] {
+            margin: 15px 0;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #preview {
+            margin-top: 20px;
+            max-width: 300px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+        }
+        #result {
+            margin-top: 25px;
+            font-size: 18px;
+            color: #222;
+        }
+    </style>
 </head>
 <body>
-    <h1>Welcome to AI Doctor Image Classification</h1>
+    <h1>AI Doctor Image Classification</h1>
+
+    <div id="upload-section">
+        <form id="uploadForm">
+            <input type="file" id="imageInput" name="image" accept="image/*" required>
+            <br>
+            <button type="submit">Classify Image</button>
+        </form>
+
+        <img id="preview" src="" alt="">
+        <div id="result"></div>
+    </div>
+
+    <script>
+        const form = document.getElementById('uploadForm');
+        const imageInput = document.getElementById('imageInput');
+        const preview = document.getElementById('preview');
+        const resultDiv = document.getElementById('result');
+
+        // Image preview
+        imageInput.addEventListener('change', () => {
+            const file = imageInput.files[0];
+            if (file) {
+                preview.src = URL.createObjectURL(file);
+                preview.style.display = 'block';
+            } else {
+                preview.src = '';
+            }
+        });
+
+        // Submit to backend
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const file = imageInput.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('image', file);
+
+            resultDiv.textContent = 'Classifying...';
+
+            try {
+                const response = await fetch('/classify', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) throw new Error('Request failed');
+
+                const data = await response.json();
+                resultDiv.innerHTML = `
+                    <strong>Domain:</strong> ${data.domain}<br>
+                    <strong>Predicted Class:</strong> ${data.predicted_class}
+                `;
+            } catch (err) {
+                resultDiv.textContent = 'Error: ' + err.message;
+            }
+        });
+    </script>
 </body>
 </html>
