@@ -53,7 +53,7 @@ def classify_uploaded_image(file_bytes):
         transforms.Normalize(mean, std)
     ])
 
-    image = Image.open(io.BytesIO(file_bytes))
+    image = Image.open(io.BytesIO(file_bytes)).convert('RGB')
     img_tensor = transform(image).unsqueeze(0).to(DEVICE)
 
     # ----- Predict Domain -----
